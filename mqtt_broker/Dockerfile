@@ -2,7 +2,7 @@
 FROM eclipse-mosquitto:latest
 
 # Install rsync and openssh
-RUN apk add --no-cache rsync openssh sshpass
+RUN apk add --no-cache rsync openssh sshpass iperf3
 
 # Copy mosquitto.conf
 COPY mosquitto.conf /mosquitto/config/mosquitto.conf
@@ -10,6 +10,7 @@ COPY mosquitto.conf /mosquitto/config/mosquitto.conf
 # Expose Mosquitto and SSH ports
 EXPOSE 1883
 EXPOSE 22
+EXPOSE 5201
 
 # Generate SSH host keys, set root password, and configure SSH
 RUN ssh-keygen -A \

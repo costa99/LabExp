@@ -24,7 +24,7 @@ sleep 5
 # Start 20 MQTT publisher clients dynamically
 for i in {1..6}; do
     ip="192.168.5.$((21 + i))"  # IPs from 192.168.5.21 to 192.168.5.40
-    sudo podman run --name="client_pub_$i" --network=newnet --ip="$ip" -d client_pub
+    sudo podman run --name="client_pub_$i" --network=newnet --ip="$ip" -v /home/vboxuser/Scrivania/LabExp/client_logs:/app/logs -d client_pub 
 done
 
 # Step 3: Monitor database file size and stop if it reaches 200MB

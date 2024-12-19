@@ -8,7 +8,7 @@ while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 copy_sshd_config() {
     container_name=$1
     #local_sshd_config_path="home/labexp24/migration/mqtt_broker/sshd_config"  Adjust this path if necessary
-    sudo podman cp /home/labexp24/migration/mqtt_broker/sshd_config "$container_name:/etc/ssh/sshd_config"
+    sudo podman cp /home/vboxuser/Scrivania/LabExp/mqtt_broker/sshd_config "$container_name:/etc/ssh/sshd_config"
     sudo podman exec "$container_name" chmod 600 /etc/ssh/sshd_config  # Set proper permissions
 }
 # Step 1: Start first Mosquitto broker
@@ -25,7 +25,7 @@ sleep 5
 # Step 4: Start 40 MQTT clients dynamically
 for i in {1..2}; do
     ip="192.168.5.$((21 + i))"  # IPs from 192.168.5.21 to 192.168.5.60
-    sudo podman run --name="client_pub_$i" --network=newnet --ip="$ip" -v /home/labExp/client_logs:/app/logs -d client_pub 
+    sudo podman run --name="client_pub_$i" --network=newnet --ip="$ip" -v /home/vboxuser/Scrivania/LabExp/client_logs:/app/logs -d client_pub 
     
 done
 # Time to catch some message exchanges before migration
@@ -48,6 +48,7 @@ sudo podman network disconnect newnet mosquitto1
 echo "Starting mosquitto2"
 #add broker downtime
 sudo podman network disconnect newnet mosquitto2
-sleep 2
+sleep 10
+echo "waitig for file transfer"
 sudo podman network connect --ip 192.168.5.10 newnet mosquitto2
 echo "IP changed"
