@@ -2,24 +2,6 @@
 # Automatize the insert of sudo password (requested only once)
 sudo -v 
 while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
-# Set ssh config to make containers communic
-#tc qdisc add dev cni-podman1 root tbf rate 10mbit burst 32kbit latency 400ms
-
-copy_sshd_config() {
-    container_name=$1
-    #local_sshd_config_path="home/labexp24/migration/mqtt_broker/sshd_config"  Adjust this path if necessary
-    sudo podman cp /home/vboxuser/Scrivania/LabExp/mqtt_broker/sshd_config "$container_name:/etc/ssh/sshd_config"
-    sudo podman exec "$container_name" chmod 600 /etc/ssh/sshd_config  # Set proper permissions
-}
-# Step 1: Start first Mosquitto broker
-sudo podman run --name=mosquitto1 --network=newnet --ip=192.168.5.10 -d mqtt_broker_m
-# Step 2: Start second Mosquitto broker
-sudo podman run --name=mosquitto2 --network=newnet --ip=192.168.5.11 -d mqtt_broker_m
-# Step 3: Setup SSH key-based authentication between the containers
-copy_sshd_config mosquitto1
-copy_sshd_config mosquitto2
-# Make sure broker is ready 
-sleep 5
 # Step 4: Start MQTT clients
 #sudo podman run --name=client_sub --network=newnet --ip=192.168.5.20 -d client_sub
 # Step 4: Start 40 MQTT clients dynamically
@@ -43,12 +25,16 @@ sudo podman exec -it mosquitto1 sshpass -p "password" rsync -av --no-compress --
 #time sudo podman exec -it mosquitto1 sshpass -p "password" scp -v -o StrictHostKeyChecking=no /mosquitto/mosquitto.db root@192.168.5.11:/mosquitto/mosquitto.db
 
 echo "Stopping mosquitto1"
+migration_start=$(date +%s%N)
 # Step 6: Simulate disconnection and migration
 sudo podman network disconnect newnet mosquitto1
 echo "Starting mosquitto2"
 #add broker downtime
 sudo podman network disconnect newnet mosquitto2
 sleep 10
-echo "waitig for file transfer"
 sudo podman network connect --ip 192.168.5.10 newnet mosquitto2
 echo "IP changed"
+migration_end=$(date +%s%N)
+migration_duration=$(($migration_end - $migration_start))
+migration_duration_seconds=$(echo "scale=3; $migration_duration / 1000000000" | bc)
+echo "Migration complete. Time spent during migration: ${migration_duration_seconds} seconds"

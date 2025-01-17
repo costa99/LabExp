@@ -1,7 +1,7 @@
 # Use the official Eclipse Mosquitto image as the base image
 FROM eclipse-mosquitto:latest
 
-# Install rsync and openssh
+# Install rsync and openssh sshpass iperf3
 RUN apk add --no-cache rsync openssh sshpass iperf3
 
 # Copy mosquitto.conf
