@@ -19,6 +19,6 @@ sudo podman run --name=mosquitto2 --network=newnet --ip=192.168.5.11 -d mqtt_bro
 copy_sshd_config mosquitto1
 copy_sshd_config mosquitto2
 
-for veth in $(ifconfig | awk '/^veth/ {print $1}'); do
-    sudo tc qdisc add dev "$veth" root tbf rate 10mbit latency 20ms burst 32k
-done
+#for veth in $(ifconfig | awk '/^veth/ {print $1}'); do
+#    sudo tc qdisc add dev "$veth" root tbf rate 10mbit burst 15k limit 30000
+#done

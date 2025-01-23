@@ -25,17 +25,6 @@ for i in $(seq 1 10); do
     kill_and_remove "client_pub_$i"
 done
 sudo podman container prune -y
-# Remove the image for the client_pub
-sudo podman image rm client_pub || echo "Failed to remove client_pub image"
-sudo podman image rm mqtt_broker_m || echo "Failed to remove broker image"
 
-cd mqtt_broker
-sudo podman build -t mqtt_broker_m .
-cd ..
-
-# Build the client_sub and client_pub images
-cd mqtt_client
-sudo podman build -t client_pub .
-cd ..
 
 

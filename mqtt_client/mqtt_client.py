@@ -8,14 +8,20 @@ import os
 import sys
 import csv
 from datetime import datetime
-from threading import Thread
+from threading import Thread, Event
 
 # Global variables
+initial_connection = True
+db_generate = True
+index = 1
 disconnect_time = 0  # To track the time of disconnection
 reconnect_time = 0  # To track reconnection timestamp
-disconnected = 0  # To flag if the client is disconnected
+disconnected = Event()  # To flag if the client is disconnected
 publish_rate = 0  # Publish rate in messages per second
 fails_count = 0
+success_count = 0
+received_counter = 0
+stop_publishing = Event()
 # CSV file setup
 csv_file = "/app/logs/mqtt_log.csv"
 
@@ -26,20 +32,47 @@ with open(csv_file, mode="w", newline="") as file:
 
 # MQTT Callbacks
 def on_connect(client, userdata, flags, rc, properties=None):
-    global disconnected
+    global initial_connection
+    client.subscribe('test/topic', qos=1)  # Subscribe to the topic with QoS 1
 
-    if disconnected == 0:
-        if rc == 0:  # Successful connection
+    if rc == 0:
             connect_time = time.time()
             print(f"\nTime: {datetime.fromtimestamp(connect_time)} | Client {client._client_id.decode('utf-8')} connected to the Broker with reason code: {rc}", flush=True)
-            client.subscribe('test/topic', qos=1)  # Subscribe to the topic with QoS 1
+            if initial_connection:
+                initial_connection = False
+            else:
+                reconnect_time = time.time()
+                disconnection_duration = reconnect_time - disconnect_time
+                client_id = client._client_id.decode('utf-8')  # Get the client ID
+                # Log disconnect and reconnect times, failed count, and publish rate to CSV
+                with open(csv_file, mode="a", newline="") as file:
+                    writer = csv.writer(file)
+                    writer.writerow([
+                        client_id,
+                        datetime.fromtimestamp(disconnect_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                        datetime.fromtimestamp(reconnect_time).strftime('%Y-%m-%d %H:%M:%S.%f')[:-3],
+                        round(disconnection_duration, 3),
+                        fails_count,
+                        round(publish_rate, 2)
+                    ])
+                print(f"\nReconnected successfully after {disconnection_duration}.", flush=True)
+                   # Clear the stop event and restart publishing
+                stop_publishing.clear()
+                publish_thread = Thread(target=publish_msg, args=(client,100))
+                publish_thread.start()
 
-        else:  # Connection failed
+            disconnected.clear()
+            stop_publishing.clear()
+
+
+    else:  # Connection failed
             print(f"\nConnection failed with code {rc}", flush=True)
 
 def on_message(client, userdata, msg):
+    global received_counter
     """Callback to handle incoming messages."""
-    print(f"\nTime: {datetime.fromtimestamp(time.time())} | Message received on topic '{msg.topic}': {msg.payload.decode('utf-8')}", flush=True)
+    received_counter += 1
+    #print(f"\nTime: {datetime.fromtimestamp(time.time())} | Message received on topic '{msg.topic}': {msg.payload.decode('utf-8')}", flush=True)
 
 
 def generate_large_payload(min_mb, max_mb):
@@ -47,38 +80,46 @@ def generate_large_payload(min_mb, max_mb):
     size_bytes = int(size_mb * 1024 * 1024)  # Convert size from MB to bytes
     return "A" * size_bytes  # Return a string of 'A' characters with the generated size
 
-def publish_msg(client, i):
-    global publish_rate, fails_count
+def publish_msg(client, duration):
+    global publish_rate, success_count, fails_count, index, db_generate
 
-    print(f"\nTime: {datetime.fromtimestamp(time.time())} | Client {client._client_id.decode('utf-8')} started to publish", flush=True)
-    start_time = time.time()
-    success_count = 0  # Counter for successful publishes
-    fails_count = 0  # Counter for failed publishes
     fails_disconnection = 0  # Counter for publishes failed during disconnections
-    duration = 260  # Total duration to run the publishing in seconds
 
-    global disconnected
+    while not stop_publishing.is_set():
+        print(f"\nTime: {datetime.fromtimestamp(time.time())} | Client {client._client_id.decode('utf-8')} publishing", flush=True)
 
-    while True:  # Continue until the duration expires
-        payload = generate_large_payload(2, 2)  # Generate a random large payload between 9MB and 10MB
-        result = client.publish('test/topic', qos=1, retain=True)  # Publish to the topic with QoS 1 and retain flag
-        for i in range(1 , 9999999):
-            client.publish(f"test/topic{i}", payload, qos=1, retain=True)
-            sleep(1)
-            if result[0] == 0:  # If publish is successful
-                success_count += 1
-            else:  # If publish fails
-                fails_count += 1
-                if disconnected:  # If the client was disconnected during the failure
-                    fails_disconnection += 1
+        # Check if publishing should stop (e.g., on disconnection)
+        # Publish a message without a payload to the 'topic'
+        result_no_payload = client.publish('test/topic', qos=1, retain=True)
 
+        # Generate a random large payload (between 1MB and 2MB)
+        payload = generate_large_payload(1, 2)
+
+        # Publish the large payload to a topic with an increasing index
+        if db_generate:
+            result_with_payload = client.publish(f"test/topic{index}", payload, qos=1, retain=True)
+
+        # Increment the topic index for the next message
+        index += 1
+
+        # Track the results of the publish attempts
+        if result_no_payload[0] == 0:  # Success for the message without payload
+            success_count += 1
+        else:  # Failure for the message without payload
+            fails_count += 1
+            if disconnected.is_set():  # If the client was disconnected during the failure
+                fails_disconnection += 1
+        print(f"succes: {success_count}, fails: {fails_count}, received: {received_counter}", end="\r", flush=True)
         # Calculate remaining time and display status on the same line
-        elapsed_time = time.time() - start_time
-        remaining_time = max(0, int(duration - elapsed_time))
-        publish_rate = success_count / elapsed_time if elapsed_time > 0 else 0
-        sys.stdout.write(f"\rSuccess: {success_count} | Fails: {fails_count} | Fails during disconnection: {fails_disconnection} | Total: {success_count + fails_count} | Remaining: {remaining_time} | Rate: {publish_rate:.2f} msg/sec")
-        sys.stdout.flush()
-        time.sleep(2)  # Small delay to prevent flooding the broker with messages
+        #elapsed_time = time.time() - start_time
+        #remaining_time = max(0, int(duration - elapsed_time))
+        #publish_rate = success_count / elapsed_time if elapsed_time > 0 else 0
+        #print(f"\rSuccess: {success_count} | Fails: {fails_count} | Fails during disconnection: {fails_disconnection} | Total: {success_count + fails_count} | Remaining: {remaining_time} | Rate: {publish_rate:.2f} msg/sec")
+
+        time.sleep(2)  # Delay of 2 seconds between publish attempts
+
+        if index >= duration:
+            break  # Exit the loop once the duration is met
 
     # After finishing the publishing loop, print the final statistics
     print(f"\nFinished publishing: Success: {success_count} | Fails: {fails_count} | Fails during disconnection: {fails_disconnection} | Total: {success_count + fails_count}", flush=True)
@@ -87,26 +128,37 @@ def publish_msg(client, i):
 def on_subscribe(client, userdata, mid, granted_qos, properties=None):
     print(f"\nTime: {datetime.fromtimestamp(time.time())} | Subscribed with QoS {granted_qos}", flush=True)
 
+def easy_disconnection(client, userdata, rc):
+    if rc!=0:
+        global disconnect_time, db_generate
+        disconnect_time = time.time()
+        disconnected.set()  # Signal disconnection
+        stop_publishing.set()  # Pause publishing
+        db_generate = False
+        print("Unexpected disconnection. Will auto-reconnect")
 
+def handle_disconnect(client, userdata, rc):
+    global disconnect_time, reconnect_time
 
-def handle_disconnect(client, rc):
-    global disconnect_time, reconnect_time, disconnected, fails_count
+    disconnect_time = time.time()
     client_id = client._client_id.decode('utf-8')  # Get the client ID
-    disconnected = 1  # Set the disconnected flag
-    print(f"\nTime: {datetime.fromtimestamp(disconnect_time)} | Client {client._client_id.decode('utf-8')} disconnected. Reason code: {rc}", flush=True)
+    disconnected.set()  # Signal disconnection
+    stop_publishing.set()  # Pause publishing
 
+    print(f"\nTime: {datetime.fromtimestamp(disconnect_time)} | Client {client._client_id.decode('utf-8')} disconnected. Reason code: {rc}", flush=True)
     print("\nUnexpected disconnection. Reconnecting...", flush=True)
+
     retry_count = 0
     MAX_RETRIES = 40  # Maximum number of retry attempts
 
     while True:
-        #if client.is_connected():
-        if rc!= 0:
-            print("\nTrying to connect...", flush=True)
-            if client.is_connected():
+        if rc != 0:
+            print("\nTrying to reconnect...", flush=True)
+            try:
+                client.reconnect()
                 reconnect_time = time.time()
-                disconnected = 0  # Clear the disconnected flag
                 disconnection_duration = reconnect_time - disconnect_time
+
                 # Log disconnect and reconnect times, failed count, and publish rate to CSV
                 with open(csv_file, mode="a", newline="") as file:
                     writer = csv.writer(file)
@@ -119,11 +171,16 @@ def handle_disconnect(client, rc):
                         round(publish_rate, 2)
                     ])
                 print("\nReconnected successfully.", flush=True)
+                   # Clear the stop event and restart publishing
+                stop_publishing.clear()
+                publish_thread = Thread(target=publish_msg, args=(client,100))
+                publish_thread.start()
                 break
 
-        retry_count += 1
-        print(f"\nRetry {retry_count}/{MAX_RETRIES} failed. Retrying in 2 seconds...", flush=True)
-        time.sleep(2)  # Wait for 2 seconds before retrying
+            except Exception as e:
+                retry_count += 1
+                print(f"\nRetry {retry_count}/{MAX_RETRIES} failed. Retrying in 2 seconds...", flush=True)
+                time.sleep(2)  # Wait before retrying
 
 def on_disconnect(client, userdata, rc):
     global disconnect_time
@@ -148,12 +205,12 @@ args = parser.parse_args()
 client = paho.Client(client_id=args.cid, protocol=paho.MQTTv311, clean_session=False)
 client.on_connect = on_connect  # Assign the on_connect callback
 client.on_subscribe = on_subscribe  # Assign the on_subscribe callback
-client.on_disconnect = on_disconnect  # Assign the on_disconnect callback
+client.on_disconnect = easy_disconnection  # Assign the on_disconnect callback
 client.on_message = on_message  # Assign the on_message callback
-client.connect(args.broker, 1883, keepalive=5)  # Connect to the broker with the provided parameters
+client.connect(args.broker, 1883, keepalive=1)  # Connect to the broker with the provided parameters
 
 # Start publishing in a separate thread
-publish_thread = Thread(target=publish_msg, args=(client, 10))
+publish_thread = Thread(target=publish_msg, args=(client, 400))
 publish_thread.start()  # Start the publish message function in a new thread
 
 # Start the MQTT client loop (this handles background tasks such as keep-alive and incoming messages)
