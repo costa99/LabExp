@@ -4,7 +4,7 @@
 sudo -v
 while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-TARGET_SIZE_MB=50
+TARGET_SIZE_MB=10
 
 # Step 1: Start MQTT clients dynamically
 for i in {1..2}; do
