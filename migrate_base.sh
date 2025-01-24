@@ -4,7 +4,7 @@
 sudo -v
 while true; do sudo -n true; sleep 60; kill -0 "$$" || exit; done 2>/dev/null &
 
-TARGET_SIZE_MB=25
+TARGET_SIZE_MB=50
 
 # Step 1: Start MQTT clients dynamically
 for i in {1..2}; do
@@ -46,7 +46,7 @@ echo "Starting database migration..."
 
 
 for veth in $(ifconfig | awk '/^veth/ {print $1}'); do
-    sudo tc qdisc add dev "$veth" root tbf rate 10mbit burst 15k limit 30000
+    sudo tc qdisc add dev "$veth" root tbf rate 2gbit burst 15k limit 30000
 
 done
 sudo podman exec -it mosquitto1 sshpass -p "password" scp -v \
